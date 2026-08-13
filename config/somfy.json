@@ -1,0 +1,7 @@
+{
+  "tahoma_ip": "",
+  "tahoma_token": "",
+  "mqtt_prefix": "somfy",
+  "poll_interval": 30,
+  "devices": []
+}

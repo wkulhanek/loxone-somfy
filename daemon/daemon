@@ -1,0 +1,34 @@
+#!/bin/bash
+
+# Somfy TaHoma Shade Control daemon startup script
+# Executed at boot time as root by LoxBerry
+
+PLUGINNAME=REPLACELBPPLUGINDIR
+DAEMON=REPLACELBPBINDIR/somfy_daemon.py
+CONFIGDIR=REPLACELBPCONFIGDIR
+LOGDIR=REPLACELBPLOGDIR
+DATADIR=REPLACELBPDATADIR
+PYTHON="$DATADIR/venv/bin/python3"
+PIDFILE=/run/shm/somfy.pid
+
+if [ -f "$PIDFILE" ]; then
+    OLDPID=$(cat "$PIDFILE")
+    if kill -0 "$OLDPID" 2>/dev/null; then
+        logger "somfy: Daemon already running (PID $OLDPID)"
+        exit 0
+    fi
+fi
+
+if [ -x "$DAEMON" ]; then
+    # Ensure log directory is writable by loxberry user
+    chown -R loxberry:loxberry "$LOGDIR" 2>/dev/null
+    logger "somfy: Starting daemon"
+    su - loxberry -s /bin/bash -c \
+        "\"$PYTHON\" \"$DAEMON\" --configdir \"$CONFIGDIR\" --logdir \"$LOGDIR\" &
+         echo \$! > \"$PIDFILE\""
+    logger "somfy: Daemon started"
+else
+    logger "somfy: Daemon script not found or not executable: $DAEMON"
+fi
+
+exit 0

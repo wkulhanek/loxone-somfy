@@ -1,0 +1,51 @@
+#!/bin/bash
+
+# LoxBerry 2.0+ uninstall parameters
+COMMAND=$0
+PTEMPDIR=$1
+PSHNAME=$2
+PDIR=$3
+PVERSION=$4
+
+PIDFILE=/run/shm/somfy.pid
+CONFIGDIR="$LBHOMEDIR/config/plugins/$PDIR"
+CONFIGFILE="$CONFIGDIR/somfy.json"
+
+# Stop the daemon
+if [ -f "$PIDFILE" ]; then
+    PID=$(cat "$PIDFILE")
+    if kill -0 "$PID" 2>/dev/null; then
+        echo "<INFO> Stopping somfy daemon (PID $PID)..."
+        kill "$PID"
+        sleep 2
+        if kill -0 "$PID" 2>/dev/null; then
+            kill -9 "$PID"
+        fi
+    fi
+    rm -f "$PIDFILE"
+fi
+
+# Clear retained MQTT messages so stale data doesn't linger on the broker
+if [ -f "$CONFIGFILE" ] && command -v mosquitto_pub >/dev/null 2>&1; then
+    echo "<INFO> Clearing retained MQTT messages..."
+    PREFIX=$(python3 -c "import json; print(json.load(open('$CONFIGFILE')).get('mqtt_prefix', 'somfy'))" 2>/dev/null)
+    PREFIX=${PREFIX:-somfy}
+    DEVICES=$(python3 -c "
+import json
+cfg = json.load(open('$CONFIGFILE'))
+for d in cfg.get('devices', []):
+    print(d['id'])
+" 2>/dev/null)
+
+    TOPICS="closure state moving online"
+
+    for DEV_ID in $DEVICES; do
+        for TOPIC in $TOPICS; do
+            mosquitto_pub -t "$PREFIX/$DEV_ID/status/$TOPIC" -r -n 2>/dev/null
+        done
+    done
+    mosquitto_pub -t "$PREFIX/daemon/status" -r -n 2>/dev/null
+fi
+
+echo "<OK> Somfy plugin uninstalled"
+exit 0

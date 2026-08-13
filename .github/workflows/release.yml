@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify plugin.cfg version matches tag
+        run: |
+          cfg_version=$(grep '^VERSION=' plugin.cfg | cut -d= -f2)
+          if [ "$cfg_version" != "${{ steps.version.outputs.version }}" ]; then
+            echo "::error::plugin.cfg VERSION=$cfg_version does not match tag ${{ github.ref_name }}"
+            exit 1
+          fi
+
+      - name: Build plugin ZIP
+        run: |
+          zip -r "somfy-${{ github.ref_name }}.zip" . \
+            -x '.git/*' '.github/*' '.gitignore' 'UPDATES.adoc' 'RELEASE.adoc' 'bin/__pycache__/*'
+
+      - name: Update release.cfg and commit
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          printf '[AUTOUPDATE]\nVERSION=%s\nARCHIVEURL=https://github.com/%s/releases/download/%s/somfy-%s.zip\nINFOURL=https://github.com/%s/releases\n' \
+            "$VERSION" "$REPO" "$TAG" "$TAG" "$REPO" > release.cfg
+          cp release.cfg prerelease.cfg
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add release.cfg prerelease.cfg
+          git diff --cached --quiet && exit 0
+          git commit -m "Update release.cfg for $TAG"
+          git push origin main
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: somfy-${{ github.ref_name }}.zip
+          generate_release_notes: true

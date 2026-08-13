@@ -1,0 +1,326 @@
+= Somfy TaHoma Shade Control
+:toc: macro
+:toclevels: 2
+:icons: font
+
+LoxBerry plugin for controlling Somfy shades and blinds via the TaHoma gateway's local API and MQTT.
+
+toc::[]
+
+== Overview
+
+This plugin connects your Somfy shades (roller shutters, blinds, awnings) to your Loxone Miniserver through LoxBerry's MQTT gateway.
+It communicates directly with the TaHoma gateway on your local network -- no cloud connection required.
+The daemon polls device states and publishes them to MQTT, and accepts open/close/stop commands via MQTT.
+
+=== Features
+
+* Control multiple Somfy shades from a single LoxBerry instance
+* Local communication via TaHoma gateway (no internet dependency)
+* Automatic device discovery with filtering for shade devices
+* Retained MQTT messages for reliable state synchronization
+* Downloadable Loxone Config XML template for quick setup
+* Hot-reload of configuration (no daemon restart needed)
+* Integrated LoxBerry logging with configurable log levels
+
+== Prerequisites
+
+* **LoxBerry 3.0** or newer
+* **Somfy TaHoma gateway** with local API enabled
+* **Local API bearer token** (see <<obtaining-token>>)
+* **MQTT broker** (built into LoxBerry)
+
+== Installation
+
+=== From GitHub Release (recommended)
+
+. Go to the https://github.com/wkulhanek/loxone-somfy/releases[Releases page]
+. Download the latest `somfy-v*.zip` file
+. Open your LoxBerry web interface and navigate to **Plugin Management**
+. Click **Add Plugin**, select the downloaded ZIP, and click **Install**
+
+=== From Repository URL
+
+. Open your LoxBerry web interface
+. Navigate to **Plugin Management**
+. Click **Add Plugin** and enter the GitHub repository URL:
++
+----
+https://github.com/wkulhanek/loxone-somfy
+----
+. Click **Install**
+
+The installer automatically creates a Python virtual environment and installs the required dependencies (`paho-mqtt`, `requests`).
+
+=== Upgrades
+
+Plugin upgrades preserve your device configuration automatically.
+The plugin uses a `preupgrade.sh` script to back up your config before the upgrade and restores it afterward.
+
+=== Automatic Updates
+
+The plugin supports LoxBerry's automatic update mechanism.
+When enabled in **Plugin Management**, LoxBerry checks for new releases on GitHub and offers to install them.
+
+== Configuration
+
+[[obtaining-token]]
+=== Step 1: Obtain a TaHoma API Token
+
+The TaHoma gateway provides a local REST API that requires a bearer token for authentication.
+To generate a token:
+
+. Open the https://dev.somfy.com[Somfy Developer Portal] and create an account
+. Register your TaHoma gateway
+. Generate a local API token for your gateway
+. Copy the token -- you will need it in the next step
+
+NOTE: The TaHoma gateway uses a self-signed SSL certificate. The plugin automatically handles this by disabling certificate verification for local API calls.
+
+=== Step 2: Connect to TaHoma
+
+. Open the plugin web UI (LoxBerry > Plugins > Somfy TaHoma Shade Control)
+. Expand the **TaHoma Connection** section
+. Enter the **IP address** of your TaHoma gateway (e.g. `192.168.1.100`)
+. Enter the **bearer token** from Step 1
+. Click **Test Connection** to verify
+. Click **Save Connection**
+
+=== Step 3: Add Devices
+
+The easiest way to add devices is via discovery:
+
+. Click **Discover Devices** in the Devices section
+. A list of shade devices (those with closure state) appears
+. Click the **+** button next to each shade you want to add
+. The device is added with its name and device URL
+
+Alternatively, add devices manually by clicking **Add Device** and entering the device name and device URL (e.g. `io://2336-7307-8888/14882250`).
+
+=== Step 4: Settings
+
+[cols="1,1,3"]
+|===
+| Setting | Default | Description
+
+| MQTT Prefix
+| `somfy`
+| Prefix for all MQTT topics
+
+| Poll Interval
+| `30`
+| Seconds between status polls (5-300)
+|===
+
+Click **Save Settings** after making changes.
+
+=== Step 5: Start the Daemon
+
+Click **Restart** in the daemon control section.
+The daemon connects to the MQTT broker and begins polling your shades.
+
+== MQTT Reference
+
+All topics use retained messages. The default prefix is `somfy`.
+
+=== Status Topics (read-only)
+
+Published by the daemon every poll interval.
+
+Topic pattern: `{prefix}/{device_id}/status/{property}`
+
+[cols="1,1,1,2"]
+|===
+| Property | Type | Range | Description
+
+| `closure`
+| Integer
+| 0-100
+| Closure percentage (0 = fully open, 100 = fully closed)
+
+| `state`
+| String
+| open / closed
+| Open/closed state
+
+| `moving`
+| Binary
+| 0 / 1
+| Whether the shade is currently moving
+
+| `online`
+| Binary
+| 0 / 1
+| Device reachable via TaHoma gateway
+|===
+
+=== Command Topic (write)
+
+Publish one of the accepted values as the message payload to control the shade.
+The daemon re-polls the device after each command.
+
+Topic pattern: `{prefix}/{device_id}/cmd`
+
+[cols="1,2"]
+|===
+| Payload | Action
+
+| `open`
+| Fully open the shade
+
+| `close`
+| Fully close the shade
+
+| `stop`
+| Stop the shade at its current position
+|===
+
+=== Daemon Status
+
+[cols="1,2"]
+|===
+| Topic | Values
+
+| `{prefix}/daemon/status`
+| `online` when running, `offline` on shutdown (will message)
+|===
+
+=== Examples
+
+Open a shade:
+----
+mosquitto_pub -t "somfy/buero_shade/cmd" -m "open"
+----
+
+Close a shade:
+----
+mosquitto_pub -t "somfy/buero_shade/cmd" -m "close"
+----
+
+Stop a shade mid-travel:
+----
+mosquitto_pub -t "somfy/buero_shade/cmd" -m "stop"
+----
+
+Monitor all status updates:
+----
+mosquitto_sub -t "somfy/#" -v
+----
+
+== Loxone Config Integration
+
+The plugin can generate an XML template for importing Virtual Inputs into Loxone Config.
+
+=== Download the XML Template
+
+. Open the plugin web UI
+. Expand the **MQTT Topics** section at the bottom
+. Click the **VI_MQTT_UDP_Somfy.xml** button
+. Save the downloaded file
+
+=== Import into Loxone Config
+
+. Open **Loxone Config**
+. Navigate to **Periphery** in the left panel
+. Right-click **Virtual Inputs** and select **Import**
+. Select the downloaded `VI_MQTT_UDP_Somfy.xml` file
+. A new Virtual Input named "Somfy Shades (MQTT UDP)" appears with entries for each device property
+
+The template uses **port 11883** (LoxBerry MQTT Gateway UDP port).
+Each configured device gets entries for: closure, state, moving, and online.
+
+=== Using the Virtual Inputs
+
+After import, drag the Virtual Input entries you need into your Loxone project:
+
+* **Closure** (0-100) -- connect to an analog status display or jalousie block
+* **State** (open/closed) -- connect to a status indicator
+* **Moving** (0/1) -- use for animations or blocking logic
+* **Online** (0/1) -- use for monitoring and alerts
+
+To send commands to the shades, create Virtual Outputs manually in Loxone Config that publish to the `{prefix}/{device_id}/cmd` MQTT topic with `open`, `close`, or `stop` as the payload.
+
+== Logging
+
+The plugin integrates with LoxBerry's logging system.
+The log level can be configured in **LoxBerry > System > Plugin Management** (dropdown next to the Somfy plugin).
+
+=== Log Levels
+
+[cols="1,1,3"]
+|===
+| Level | Name | What is logged
+
+| 7
+| Debug
+| Every TaHoma API request/response, MQTT messages, poll results, state values
+
+| 6
+| Info
+| Device discovery, daemon start/stop, commands sent
+
+| 5
+| OK
+| Same as Info
+
+| 4
+| Warning
+| MQTT disconnects, poll failures, unknown commands
+
+| 3
+| Error
+| TaHoma API failures, connection errors, config errors
+
+| 0
+| Off
+| Logging disabled
+|===
+
+=== Log Files
+
+The daemon writes to `LBPLOGDIR/somfy.log` (typically `/opt/loxberry/log/plugins/somfy/somfy.log`).
+The file rotates at 1 MB with 3 backups.
+
+Web UI actions (config saves, daemon control) are additionally registered in LoxBerry's Log Manager and visible under **LoxBerry > System > Log Manager**.
+
+=== Development / Testing
+
+When running outside of LoxBerry, use the `--loglevel` flag:
+
+----
+python3 bin/somfy_daemon.py --configdir ./config --logdir ./log --loglevel DEBUG
+----
+
+== TaHoma API Reference
+
+The plugin uses two endpoints on the TaHoma gateway's local REST API:
+
+[cols="1,1,2"]
+|===
+| Method | Endpoint | Purpose
+
+| GET
+| `/enduser-mobile-web/1/enduserAPI/setup/devices`
+| List all devices and their current states
+
+| POST
+| `/enduser-mobile-web/1/enduserAPI/exec/apply`
+| Execute a command (open, close, stop)
+|===
+
+Base URL: `https://{gateway_ip}:8443`
+
+All requests require the `Authorization: Bearer {token}` header.
+The gateway uses a self-signed certificate (SSL verification is disabled).
+
+== Uninstall
+
+When uninstalled through LoxBerry Plugin Management:
+
+. The daemon is stopped
+. All retained MQTT messages are cleared (requires `mosquitto_pub`)
+. Plugin files are removed
+
+== License
+
+This project is licensed under the Apache License 2.0.
