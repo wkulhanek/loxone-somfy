@@ -5,9 +5,11 @@ import json
 import logging
 import logging.handlers
 import os
+import queue
 import signal
 import subprocess
 import sys
+import threading
 import time
 
 import paho.mqtt.client as mqtt
@@ -132,6 +134,7 @@ class SomfyDaemon:
         self.mqtt_client = None
         self.running = False
         self.config_mtime = 0
+        self._cmd_queue = queue.SimpleQueue()
 
     def setup_logging(self):
         os.makedirs(self.log_dir, exist_ok=True)
@@ -279,7 +282,15 @@ class SomfyDaemon:
             return
 
         logger.info("Command: %s = %s", dev_id, payload)
-        self._execute_command(dev_id, payload)
+        self._cmd_queue.put((dev_id, payload))
+
+    def _cmd_worker(self):
+        while self.running:
+            try:
+                dev_id, command = self._cmd_queue.get(timeout=1)
+                self._execute_command(dev_id, command)
+            except queue.Empty:
+                continue
 
     def _execute_command(self, dev_id, command):
         dev_entry = self.devices.get(dev_id)
@@ -384,6 +395,7 @@ class SomfyDaemon:
         time.sleep(1)
 
         self.running = True
+        threading.Thread(target=self._cmd_worker, daemon=True).start()
         last_poll = 0
 
         while self.running:
